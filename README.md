@@ -11,19 +11,19 @@ You can edit both agents' prompts, pick a different model per side, and re-run t
 This is a static site. It runs entirely in your browser — no backend, no accounts.
 
 1. Open the hosted page (or run `npm install && npm run dev` locally).
-2. Paste an **OpenRouter API key** into the top bar. It is stored in your browser's localStorage and sent only to `openrouter.ai`.
-3. Pick a scenario.
-4. Pick a model for the Requester (A) and the Source (B).
+2. Paste an **OpenRouter API key** into the footer. It is stored in your browser's localStorage and sent only to `openrouter.ai`.
+3. Pick a scenario in the scenario bar at the top.
+4. Pick a model for the Client AI (A) and the Data AI (B).
 5. Press **Run** and watch.
 
 Your key is used only in this tab. It never reaches any server we run, and the code is open for audit here.
 
 ## What you see
 
-- **Requester (A), left** — the agent with no tools. It asks for data in natural language.
-- **Conversation, middle** — the live transcript. The Source's tool calls are rendered as cards, so nothing is hidden.
-- **Source (B), right** — the agent that owns a dataset. Its fixed toolkit is `inspect`, `query`, `page`, `deliver` (all capped).
-- **Controls** — Run, Pause, Step, Resume, Stop, Restart. Temperature defaults to 0; same seed + same prompts = same data.
+- **Client AI, left** — the agent with no tools. It asks for data in natural language.
+- **Conversation, middle** — the live transcript. The Data AI's tool calls are rendered as cards, so nothing is hidden.
+- **Data AI, right** — the agent that owns a dataset. Its fixed toolkit is `inspect`, `query`, `page`, `deliver` (all capped).
+- **Controls** — Run/Stop live in the scenario bar; Pause, Step, Resume, Temperature, Seed, Export and Run log live under **Advanced**. Temperature defaults to 0; same seed + same prompts = same data.
 - **Run log** — completed runs are listed for side-by-side comparison.
 - **Export** — download a JSON snapshot of the whole run: transcript, tool calls, both prompts, models, temperature, seed, timestamp.
 

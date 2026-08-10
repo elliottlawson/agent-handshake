@@ -49,21 +49,34 @@ export function mount(root: HTMLElement): void {
   header.appendChild(el("h1", "title", "agent-handshake"));
   header.appendChild(el("p", "tagline", "Simulate AI-to-AI interaction without a structured API."));
 
-  const top = el("div", "topbar");
+  // ---- scenario bar: scenario picker + primary run controls + status ----
+  const scenarioBar = el("div", "scenario-bar");
   const scenarioSel = el("select", "scenario-select");
   for (const s of SCENARIOS) {
     const opt = el("option", "", s.name);
     opt.setAttribute("value", s.id);
     scenarioSel.appendChild(opt);
   }
-  const keyInput = el("input") as HTMLInputElement;
-  keyInput.type = "password";
-  keyInput.placeholder = "OpenRouter API key (stays in this browser)";
-  keyInput.value = apiKey;
-  keyInput.addEventListener("input", () => {
-    apiKey = keyInput.value.trim();
-    localStorage.setItem(KEY_STORAGE, apiKey);
+  const btnRun = el("button", "btn primary", "Run");
+  const btnStop = el("button", "btn danger", "Stop");
+  btnRun.addEventListener("click", () => {
+    if (!apiKey) {
+      setStatus("set an OpenRouter API key in the footer first");
+      return;
+    }
+    if (!modelA || !modelB) {
+      setStatus("pick a model for both sides (Advanced → Refresh models if the list is empty)");
+      return;
+    }
+    startRun();
   });
+  btnStop.addEventListener("click", () => run?.stop());
+
+  // ---- advanced (collapsed): temp, seed, models, pause/step/resume, run log, export ----
+  const details = el("details", "advanced") as HTMLDetailsElement;
+  const summary = el("summary", "advanced-summary", "Advanced");
+  summary.title = "Seed, temperature, model refresh, pause/step/resume, export, run log";
+  const advanced = el("div", "advanced-body");
 
   const tempInput = el("input") as HTMLInputElement;
   tempInput.type = "number";
@@ -86,29 +99,15 @@ export function mount(root: HTMLElement): void {
 
   const refreshModelsBtn = el("button", "btn", "Refresh models");
 
-  const btnRun = el("button", "btn primary", "Run");
   const btnPause = el("button", "btn", "Pause");
   const btnStep = el("button", "btn", "Step");
   const btnResume = el("button", "btn", "Resume");
-  const btnStop = el("button", "btn danger", "Stop");
   const btnExport = el("button", "btn", "Export");
   const btnViewLog = el("button", "btn", "Run log");
 
-  btnRun.addEventListener("click", () => {
-    if (!apiKey) {
-      setStatus("set an OpenRouter API key first");
-      return;
-    }
-    if (!modelA || !modelB) {
-      setStatus("pick a model for both sides (Refresh models if the list is empty)");
-      return;
-    }
-    startRun();
-  });
   btnPause.addEventListener("click", () => run?.pause());
   btnStep.addEventListener("click", () => run?.step());
   btnResume.addEventListener("click", () => run?.resume());
-  btnStop.addEventListener("click", () => run?.stop());
 
   btnExport.addEventListener("click", () => {
     if (!run) {
@@ -123,7 +122,9 @@ export function mount(root: HTMLElement): void {
     if (panel) panel.hidden = !panel.hidden;
   });
 
-  top.append(el("label", "lbl", "Scenario"), scenarioSel, el("label", "lbl", "Key"), keyInput, el("label", "lbl", "Temp"), tempInput, el("label", "lbl", "Seed"), seedInput, refreshModelsBtn, btnRun, btnPause, btnStep, btnResume, btnStop, btnExport, btnViewLog, statusText);
+  advanced.append(el("label", "lbl", "Temp"), tempInput, el("label", "lbl", "Seed"), seedInput, refreshModelsBtn, btnPause, btnStep, btnResume, btnExport, btnViewLog);
+  details.append(summary, advanced);
+  scenarioBar.append(el("label", "lbl", "Scenario"), scenarioSel, btnRun, btnStop, details, statusText);
 
   // ---- run log ------------------------------------------------------------
   const runLogPanel = el("div", "run-log-panel");
@@ -132,10 +133,10 @@ export function mount(root: HTMLElement): void {
 
   const three = el("div", "columns");
 
-  // ---- LEFT: Requester ----------------------------------------------------
+  // ---- LEFT: Client AI (Requester A) -------------------------------------
   const left = el("section", "column requester");
-  left.appendChild(el("h2", "col-title", "Requester (A) — asks for data"));
-  left.appendChild(el("p", "hint", "No tools. Asks the Source in natural language."));
+  left.appendChild(el("h2", "col-title", "Client AI"));
+  left.appendChild(el("p", "hint", "Requester — no tools. Asks in natural language."));
   const modelASelect = select(models, modelA);
   modelASelect.addEventListener("change", () => {
     modelA = modelASelect.value;
@@ -151,17 +152,17 @@ export function mount(root: HTMLElement): void {
   });
   left.appendChild(aPrompt);
 
-  // ---- MIDDLE: transcript --------------------------------------------------
+  // ---- MIDDLE: Conversation ------------------------------------------------
   const mid = el("section", "column transcript");
   mid.appendChild(el("h2", "col-title", "Conversation"));
   const transcriptEl = el("div", "transcript");
   transcriptEl.dataset.testid = "transcript";
   mid.appendChild(transcriptEl);
 
-  // ---- RIGHT: Source --------------------------------------------------------
+  // ---- RIGHT: Data AI (Source B) --------------------------------------------
   const right = el("section", "column source");
-  right.appendChild(el("h2", "col-title", "Source (B) — owns the data"));
-  right.appendChild(el("p", "hint", "Reads its dataset only through its tools."));
+  right.appendChild(el("h2", "col-title", "Data AI"));
+  right.appendChild(el("p", "hint", "Source — reads its dataset only through its tools."));
   const modelBSelect = select(models, modelB);
   modelBSelect.addEventListener("change", () => {
     modelB = modelBSelect.value;
@@ -212,15 +213,35 @@ export function mount(root: HTMLElement): void {
 
   // ---- footer ----------------------------------------------------------------
   const footer = el("footer", "footer");
+  const keyGroup = el("div", "key-group");
+  const keyInput = el("input") as HTMLInputElement;
+  keyInput.type = "password";
+  keyInput.placeholder = "OpenRouter API key (stays in this browser)";
+  keyInput.value = apiKey;
+  keyInput.title = "OpenRouter API key — stored only in this browser's localStorage";
+  keyInput.addEventListener("input", () => {
+    apiKey = keyInput.value.trim();
+    localStorage.setItem(KEY_STORAGE, apiKey);
+  });
+  const btnClearKey = el("button", "btn", "Clear");
+  btnClearKey.title = "Remove the stored key from this browser";
+  btnClearKey.addEventListener("click", () => {
+    apiKey = "";
+    keyInput.value = "";
+    localStorage.removeItem(KEY_STORAGE);
+    setStatus("API key cleared");
+  });
+  keyGroup.append(el("label", "lbl", "Key"), keyInput, btnClearKey);
+  footer.append(keyGroup);
   footer.appendChild(
     el(
       "p",
-      "",
+      "key-note",
       "Your key is used only in this tab to call OpenRouter — it never leaves the browser. Source is open: github.com/elliottlawson/agent-handshake.",
     ),
   );
 
-  root.append(header, top, runLogPanel, three, footer);
+  root.append(header, scenarioBar, runLogPanel, three, footer);
 
   // ---- behaviors -------------------------------------------------------------
   scenarioSel.addEventListener("change", () => {
