@@ -219,9 +219,16 @@ export function mount(root: HTMLElement): void {
   keyInput.placeholder = "OpenRouter API key (stays in this browser)";
   keyInput.value = apiKey;
   keyInput.title = "OpenRouter API key — stored only in this browser's localStorage";
+  let keyLoadTimer: ReturnType<typeof setTimeout> | null = null;
   keyInput.addEventListener("input", () => {
     apiKey = keyInput.value.trim();
     localStorage.setItem(KEY_STORAGE, apiKey);
+    if (apiKey) {
+      if (keyLoadTimer) clearTimeout(keyLoadTimer);
+      keyLoadTimer = setTimeout(loadModels, 400);
+    } else {
+      resetModelSelects();
+    }
   });
   const btnClearKey = el("button", "btn", "Clear");
   btnClearKey.title = "Remove the stored key from this browser";
@@ -229,6 +236,7 @@ export function mount(root: HTMLElement): void {
     apiKey = "";
     keyInput.value = "";
     localStorage.removeItem(KEY_STORAGE);
+    resetModelSelects();
     setStatus("API key cleared");
   });
   keyGroup.append(el("label", "lbl", "Key"), keyInput, btnClearKey);
@@ -274,6 +282,15 @@ export function mount(root: HTMLElement): void {
     loadModels();
     renderPromptCard(transcriptEl, []);
   })();
+
+  function resetModelSelects(): void {
+    while (modelASelect.firstChild) modelASelect.removeChild(modelASelect.firstChild);
+    while (modelBSelect.firstChild) modelBSelect.removeChild(modelBSelect.firstChild);
+    modelASelect.appendChild(el("option", "", "Loading models…"));
+    modelBSelect.appendChild(el("option", "", "Loading models…"));
+    modelA = "";
+    modelB = "";
+  }
 
   function loadModels() {
     if (!apiKey) {
