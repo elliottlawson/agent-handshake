@@ -3,7 +3,7 @@ import type { ChatMessage, StreamDelta, ToolSchema } from "./openrouter";
 import { streamChat } from "./openrouter";
 import { buildToolSchemas, executeTool } from "./tools";
 
-export const MAX_TURNS = 24;
+export const MAX_TURNS = 48;
 export const MAX_EXTRA_TOOL_CALLS = 10;
 
 export interface RunConfig {

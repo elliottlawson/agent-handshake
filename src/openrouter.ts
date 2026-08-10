@@ -140,8 +140,21 @@ export async function streamChat(opts: StreamCallOpts, onDelta: (d: StreamDelta)
           const index = tc.index ?? 0;
           const existing = toolCalls.get(String(index)) ?? { id: tc.id ?? `call_${index}`, name: "", args: "" };
           if (tc.id) existing.id = tc.id;
-          if (tc.function?.name) existing.name += tc.function.name;
-          if (tc.function?.arguments) existing.args += tc.function.arguments;
+          if (tc.function?.name) {
+            const n = tc.function.name;
+            // Some providers (incl. DeepSeek via OpenRouter) resend the full
+            // tool name on every chunk; OpenAI sends it once then only args.
+            // Concatenating both produces 'inspectinspect...'. Only add a delta.
+            if (existing.name === "" || !existing.name.endsWith(n)) {
+              existing.name += n;
+            }
+          }
+          if (tc.function?.arguments) {
+            const a = tc.function.arguments;
+            // Resend guard for the same reason: ignore a chunk whose args are
+            // already fully present at the tail of what we've accumulated.
+            if (!existing.args.endsWith(a)) existing.args += a;
+          }
           toolCalls.set(String(index), existing);
         }
         feed({ content: "", toolCalls: new Map(toolCalls), done: false });
