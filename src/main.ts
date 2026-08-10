@@ -12,16 +12,167 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   return node;
 }
 
-function select(items: ModelInfo[], value: string): HTMLSelectElement {
-  const sel = document.createElement("select");
-  sel.appendChild(el("option", "", "Loading models…"));
-  for (const m of items) {
-    const opt = el("option", "", m.name ?? m.id);
-    opt.setAttribute("value", m.id);
-    if (m.id === value) opt.selected = true;
-    sel.appendChild(opt);
-  }
-  return sel;
+const DEFAULT_MODEL = "deepseek/deepseek-v4-flash";
+
+interface ModelPicker {
+  root: HTMLElement;
+  setItems(items: ModelInfo[]): void;
+  setValue(id: string): void;
+  getValue(): string;
+  reset(): void;
+}
+
+/**
+ * A searchable single-select combobox for the (potentially large) model list.
+ * Keyboard: type to filter, ↑/↓ to move, Enter to pick, Esc to close.
+ */
+function modelPicker(onChange: (id: string) => void): ModelPicker {
+  let items: ModelInfo[] = [];
+  let value = "";
+  let query = "";
+  let visible: ModelInfo[] = [];
+  let active = 0;
+
+  const root = el("div", "model-picker");
+  const trigger = el("input", "model-picker-value") as HTMLInputElement;
+  trigger.readOnly = true;
+  trigger.placeholder = "Loading models…";
+  trigger.title = "Pick a model";
+  const menu = el("div", "model-picker-menu");
+  const search = el("input", "model-picker-search") as HTMLInputElement;
+  search.placeholder = "Search models…";
+  const listEl = el("div", "model-picker-list");
+  menu.append(search, listEl);
+  root.append(trigger, menu);
+
+  const labelFor = (id: string): string => {
+    const m = items.find((x) => x.id === id);
+    return m ? m.name ?? m.id : id;
+  };
+
+  const open = (): void => {
+    root.classList.add("open");
+    search.value = query;
+    renderList();
+    search.focus();
+    search.select();
+  };
+
+  const close = (): void => {
+    root.classList.remove("open");
+    trigger.blur();
+  };
+
+  const commit = (id: string): void => {
+    value = id;
+    trigger.value = labelFor(id);
+    trigger.title = id;
+    onChange(id);
+    query = "";
+    close();
+  };
+
+  const renderList = (): void => {
+    const q = search.value.trim().toLowerCase();
+    query = q;
+    visible =
+      q === ""
+        ? [...items]
+        : items.filter((m) => (m.name ?? "").toLowerCase().includes(q) || m.id.toLowerCase().includes(q));
+    listEl.innerHTML = "";
+    if (items.length === 0) {
+      listEl.appendChild(el("div", "model-picker-empty", "No models loaded — enter an API key first"));
+      return;
+    }
+    if (visible.length === 0) {
+      listEl.appendChild(el("div", "model-picker-empty", `No models match "${search.value.trim()}"`));
+      return;
+    }
+    active = Math.min(Math.max(active, 0), visible.length - 1);
+    visible.forEach((m, i) => {
+      const row = el("button", "model-picker-item" + (i === active ? " active" : ""));
+      row.type = "button";
+      row.appendChild(el("span", "model-picker-name", m.name ?? m.id));
+      row.appendChild(el("span", "model-picker-id", m.id));
+      row.addEventListener("click", () => commit(m.id));
+      row.addEventListener("mousemove", () => {
+        if (active !== i) {
+          active = i;
+          toggleActive(row, true);
+        }
+      });
+      listEl.appendChild(row);
+    });
+    scrollActiveIntoView();
+  };
+
+  const toggleActive = (row: HTMLElement, on: boolean): void => {
+    if (on) row.classList.add("active");
+    else row.classList.remove("active");
+  };
+
+  const scrollActiveIntoView = (): void => {
+    const activeRow = listEl.children[active] as HTMLElement | undefined;
+    activeRow?.scrollIntoView({ block: "nearest" });
+  };
+
+  const moveHighlight = (delta: number): void => {
+    if (visible.length === 0) return;
+    (listEl.children[active] as HTMLElement | undefined)?.classList.remove("active");
+    active = (active + delta + visible.length) % visible.length;
+    (listEl.children[active] as HTMLElement | undefined)?.classList.add("active");
+    scrollActiveIntoView();
+  };
+
+  trigger.addEventListener("click", open);
+  trigger.addEventListener("focus", open);
+  search.addEventListener("input", renderList);
+  search.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      moveHighlight(1);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      moveHighlight(-1);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const m = visible[active];
+      if (m) commit(m.id);
+    } else if (e.key === "Escape") {
+      close();
+    }
+  });
+  document.addEventListener("mousedown", (e) => {
+    if (root.classList.contains("open") && !root.contains(e.target as Node)) close();
+  });
+
+  return {
+    root,
+    setItems(next: ModelInfo[]): void {
+      items = next;
+      if (value && !items.some((m) => m.id === value)) value = "";
+      trigger.value = value ? labelFor(value) : "Loading models…";
+      trigger.title = value || "Pick a model";
+      if (root.classList.contains("open")) renderList();
+    },
+    setValue(id: string): void {
+      value = id;
+      trigger.value = labelFor(id);
+      trigger.title = id;
+    },
+    getValue(): string {
+      return value;
+    },
+    reset(): void {
+      items = [];
+      value = "";
+      query = "";
+      trigger.value = "Loading models…";
+      trigger.title = "Pick a model";
+      listEl.innerHTML = "";
+      root.classList.remove("open");
+    },
+  };
 }
 
 const KEY_STORAGE = "agent-handshake:openrouter-key";
@@ -31,15 +182,14 @@ export function mount(root: HTMLElement): void {
 
   // ---- state -------------------------------------------------------------
   let scenario: Scenario = getScenario(SCENARIOS[0].id);
-  let modelA = "openai/gpt-4o";
-  let modelB = "anthropic/claude-3-5-sonnet";
+  let modelA = DEFAULT_MODEL;
+  let modelB = DEFAULT_MODEL;
   let promptA = scenario.defaultPromptA;
   let promptB = scenario.defaultPromptB;
   let temperature = 0;
   let seed = scenario.defaultSeed;
   let apiKey = localStorage.getItem(KEY_STORAGE) ?? "";
   let run: AgentRun | null = null;
-  let models: ModelInfo[] = [];
   let runLog: TestRunSettings[] = [];
 
   const statusText = el("span", "status-text", "idle");
@@ -137,12 +287,12 @@ export function mount(root: HTMLElement): void {
   const left = el("section", "column requester");
   left.appendChild(el("h2", "col-title", "Client AI"));
   left.appendChild(el("p", "hint", "Requester — no tools. Asks in natural language."));
-  const modelASelect = select(models, modelA);
-  modelASelect.addEventListener("change", () => {
-    modelA = modelASelect.value;
+  const pickerA = modelPicker((id) => {
+    modelA = id;
   });
+  pickerA.setValue(DEFAULT_MODEL);
   const aModelWrap = el("label", "lbl", "Model");
-  aModelWrap.appendChild(modelASelect);
+  aModelWrap.appendChild(pickerA.root);
   left.appendChild(aModelWrap);
   const aPrompt = el("textarea", "prompt-input");
   aPrompt.rows = 18;
@@ -163,12 +313,12 @@ export function mount(root: HTMLElement): void {
   const right = el("section", "column source");
   right.appendChild(el("h2", "col-title", "Data AI"));
   right.appendChild(el("p", "hint", "Source — reads its dataset only through its tools."));
-  const modelBSelect = select(models, modelB);
-  modelBSelect.addEventListener("change", () => {
-    modelB = modelBSelect.value;
+  const pickerB = modelPicker((id) => {
+    modelB = id;
   });
+  pickerB.setValue(DEFAULT_MODEL);
   const bModelWrap = el("label", "lbl", "Model");
-  bModelWrap.appendChild(modelBSelect);
+  bModelWrap.appendChild(pickerB.root);
   right.appendChild(bModelWrap);
 
   const infoCard = el("div", "dataset-card");
@@ -267,12 +417,7 @@ export function mount(root: HTMLElement): void {
     btnTick.hidden = !scenario.tick;
     btnTick.textContent = scenario.tickLabel ?? "Tick";
     setStatus("scenario changed");
-    const h = modelASelect.querySelectorAll("option");
-    h.forEach((o) => o.remove());
-    modelASelect.appendChild(el("option", "", "Loading models…"));
-    const h2 = modelBSelect.querySelectorAll("option");
-    h2.forEach((o) => o.remove());
-    modelBSelect.appendChild(el("option", "", "Loading models…"));
+    resetModelSelects();
     loadModels();
   });
 
@@ -284,12 +429,10 @@ export function mount(root: HTMLElement): void {
   })();
 
   function resetModelSelects(): void {
-    while (modelASelect.firstChild) modelASelect.removeChild(modelASelect.firstChild);
-    while (modelBSelect.firstChild) modelBSelect.removeChild(modelBSelect.firstChild);
-    modelASelect.appendChild(el("option", "", "Loading models…"));
-    modelBSelect.appendChild(el("option", "", "Loading models…"));
-    modelA = "";
-    modelB = "";
+    pickerA.reset();
+    pickerB.reset();
+    modelA = DEFAULT_MODEL;
+    modelB = DEFAULT_MODEL;
   }
 
   function loadModels() {
@@ -300,23 +443,14 @@ export function mount(root: HTMLElement): void {
     setStatus("loading models…");
     listModels(apiKey)
       .then((all) => {
-        models = all;
-        const prevA = [...modelASelect.options].find((o) => o.value)?.value;
-        const prevB = [...modelBSelect.options].find((o) => o.value)?.value;
-        while (modelASelect.firstChild) modelASelect.removeChild(modelASelect.firstChild);
-        while (modelBSelect.firstChild) modelBSelect.removeChild(modelBSelect.firstChild);
+        const prevA = pickerA.getValue();
+        const prevB = pickerB.getValue();
+        pickerA.setItems(all);
+        pickerB.setItems(all);
         const defaultA = prevA && all.some((m) => m.id === prevA) ? prevA : all[0]?.id;
         const defaultB = prevB && all.some((m) => m.id === prevB) ? prevB : all[Math.min(1, all.length - 1)]?.id;
-        for (const m of all) {
-          const optA = el("option", "", m.name ?? m.id);
-          optA.setAttribute("value", m.id);
-          if (m.id === defaultA) optA.selected = true;
-          modelASelect.appendChild(optA);
-          const optB = el("option", "", m.name ?? m.id);
-          optB.setAttribute("value", m.id);
-          if (m.id === defaultB) optB.selected = true;
-          modelBSelect.appendChild(optB);
-        }
+        pickerA.setValue(defaultA);
+        pickerB.setValue(defaultB);
         modelA = defaultA;
         modelB = defaultB;
         setStatus(`${all.length} tool-capable models loaded`);

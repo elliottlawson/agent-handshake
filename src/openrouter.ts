@@ -11,10 +11,19 @@ export async function listModels(apiKey: string): Promise<ModelInfo[]> {
   });
   if (!res.ok) throw new Error(`Failed to load models (HTTP ${res.status})`);
   const data = (await res.json()) as {
-    data?: { id: string; name?: string; supported_parameters?: { tools?: boolean } }[];
+    data?: {
+      id: string;
+      name?: string;
+      supported_parameters?: string[] | { tools?: boolean };
+    }[];
+  };
+  const toolCapable = (m: { supported_parameters?: string[] | { tools?: boolean } }): boolean => {
+    const sp = m.supported_parameters;
+    if (Array.isArray(sp)) return sp.includes("tools");
+    return sp?.tools === true;
   };
   return (data.data ?? [])
-    .filter((m) => m.supported_parameters?.tools === true)
+    .filter(toolCapable)
     .map((m) => ({ id: m.id, name: m.name ?? m.id }))
     .sort((a, b) => a.id.localeCompare(b.id));
 }
