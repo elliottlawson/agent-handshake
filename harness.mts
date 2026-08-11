@@ -1,8 +1,22 @@
 import { AgentRun, MAX_TURNS } from "./src/agent";
 import { SCENARIOS, getScenario } from "./src/scenarios";
 import type { TranscriptEntry } from "./src/types";
+import { readFileSync, existsSync } from "node:fs";
+import { resolve } from "node:path";
 
-// Headless CLI harness for agent-handshake.
+// Lightweight .env loader (no dotenv dep): reads a local .env if present.
+function loadEnv(): void {
+  const candidates = [resolve(process.cwd(), ".env"), resolve(process.env.HOME ?? "~", "workspace/.env")];
+  for (const path of candidates) {
+    if (!existsSync(path)) continue;
+    for (const line of readFileSync(path, "utf8").split("\n")) {
+      const m = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*)\s*$/);
+      if (m && !(m[1] in process.env)) process.env[m[1]] = m[2];
+    }
+    break;
+  }
+}
+loadEnv();
 // Runs the real two-agent loop against OpenRouter and streams the transcript
 // to the terminal live, then prints a scorecard per scenario.
 //
@@ -18,7 +32,7 @@ const get = (flag: string, def = ""): string => {
   return i >= 0 ? args[i + 1] ?? def : def;
 };
 
-const KEY = process.env.OPENROUTER_KEY ?? get("--key") ?? args[0] ?? "";
+const KEY = process.env.OPENROUTER_API_KEY ?? process.env.OPENROUTER_KEY ?? get("--key") ?? args[0] ?? "";
 const SCENARIO_FILTER = (get("--scenario") || "all").split(",").filter(Boolean);
 const MODEL_A = get("--model-a", "deepseek/deepseek-v4-flash");
 const MODEL_B = get("--model-b", "deepseek/deepseek-v4-flash");
