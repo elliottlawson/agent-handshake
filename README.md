@@ -54,3 +54,16 @@ npm run build   # static build to dist/
 ```
 
 Run the engine tests with `npx tsx logic-test.mts` and `npx tsx loop-test.mts`.
+
+## Headless harness
+
+Run the real two-agent negotiation against OpenRouter from the terminal — no browser. It streams the live transcript as it runs, then prints a scorecard (turns used, tool calls, tool failures, artifacts delivered) and saves full transcripts to `harness-output/`.
+
+```bash
+npx tsx harness.mts --key $OPENROUTER_KEY          # all 4 scenarios, defaults to DeepSeek V4 Flash on both sides
+npx tsx harness.mts --key $KEY --scenario one-job   # one scenario
+npx tsx harness.mts --key $KEY --model-b anthropic/claude-sonnet-4
+npx tsx harness.mts --key $KEY --turns 60           # override the 48-turn budget
+```
+
+Flags: `--key` (or `$OPENROUTER_KEY`), `--scenario` (comma-separated ids), `--model-a`, `--model-b`, `--turns`.
