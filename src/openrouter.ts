@@ -1,3 +1,5 @@
+import { streamText, tool, jsonSchema, type ModelMessage } from "ai";
+import { createOpenAI } from "@ai-sdk/openai";
 import type { ModelInfo } from "./types";
 
 export const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
@@ -59,109 +61,91 @@ export interface StreamDelta {
   done: boolean;
 }
 
-/**
- * Stream one chat completion from OpenRouter. Yields deltas; throws on HTTP/API error.
- */
-export async function streamChat(opts: StreamCallOpts, onDelta: (d: StreamDelta) => void): Promise<void> {
-  const body: Record<string, unknown> = {
-    model: opts.model,
-    messages: opts.messages,
-    temperature: opts.temperature,
-    stream: true,
-    stream_options: { include_usage: true },
-  };
-  if (opts.tools && opts.tools.length > 0) body.tools = opts.tools;
+function toModelMessages(msgs: ChatMessage[]): ModelMessage[] {
+  return msgs.map((m) => {
+    if (m.role === "tool") {
+      return {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: m.tool_call_id!,
+            toolName: "",
+            output: { type: "text", value: m.content ?? "" },
+          },
+        ],
+      };
+    }
+    if (m.role === "assistant" && m.tool_calls && m.tool_calls.length > 0) {
+      return {
+        role: "assistant",
+        content: [
+          { type: "text", text: m.content ?? "" },
+          ...m.tool_calls.map((tc) => ({
+            type: "tool-call" as const,
+            toolCallId: tc.id,
+            toolName: tc.function.name,
+            input: JSON.parse(tc.function.arguments || "{}"),
+          })),
+        ],
+      };
+    }
+    return { role: m.role, content: m.content ?? "" };
+  });
+}
 
-  const res = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
-    method: "POST",
+export async function streamChat(opts: StreamCallOpts, onDelta: (d: StreamDelta) => void): Promise<void> {
+  const openrouter = createOpenAI({
+    baseURL: `${OPENROUTER_BASE}/v1`,
+    apiKey: opts.apiKey,
     headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${opts.apiKey}`,
       "HTTP-Referer": APP_REFERRER,
       "X-OpenRouter-Title": APP_TITLE,
     },
-    body: JSON.stringify(body),
-    signal: opts.signal,
   });
 
-  if (!res.ok) {
-    let detail = "";
-    try {
-      const j = (await res.json()) as { error?: { message?: string } };
-      detail = j.error?.message ?? "";
-    } catch {
-      detail = await res.text().catch(() => "");
-    }
-    throw new Error(`OpenRouter error (HTTP ${res.status}): ${detail}`);
-  }
+  const result = streamText({
+    model: openrouter.chat(opts.model),
+    messages: toModelMessages(opts.messages),
+    temperature: opts.temperature,
+    ...(opts.tools && opts.tools.length > 0
+      ? {
+          tools: Object.fromEntries(
+            opts.tools.map((s) => [
+              s.function.name,
+              tool({
+                description: s.function.description,
+                inputSchema: jsonSchema(s.function.parameters),
+              }),
+            ]),
+          ),
+        }
+      : {}),
+    abortSignal: opts.signal,
+  });
 
-  if (!res.body) throw new Error("OpenRouter returned no body");
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder("utf-8");
-  let buffer = "";
   const toolCalls = new Map<string, { id: string; name: string; args: string }>();
   let content = "";
-  let sawDone = false;
 
-  const feed = (d: StreamDelta) => onDelta(d);
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-
-    let idx;
-    while ((idx = buffer.indexOf("\n")) !== -1) {
-      const line = buffer.slice(0, idx).trim();
-      buffer = buffer.slice(idx + 1);
-      if (!line.startsWith("data:")) continue;
-      const payload = line.slice(5).trim();
-      if (payload === "[DONE]") {
-        sawDone = true;
+  for await (const event of result.fullStream) {
+    switch (event.type) {
+      case "text-delta":
+        content += event.text;
+        onDelta({ content: event.text, toolCalls: new Map(toolCalls), done: false });
         break;
-      }
-      let json: {
-        choices?: { delta?: { content?: string | null; tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[] } }[];
-      };
-      try {
-        json = JSON.parse(payload);
-      } catch {
-        continue;
-      }
-      const delta = json.choices?.[0]?.delta;
-      if (!delta) continue;
-      if (delta.content) {
-        content += delta.content;
-        feed({ content: delta.content, toolCalls: new Map(toolCalls), done: false });
-      }
-      if (delta.tool_calls) {
-        for (const tc of delta.tool_calls) {
-          const index = tc.index ?? 0;
-          const existing = toolCalls.get(String(index)) ?? { id: tc.id ?? `call_${index}`, name: "", args: "" };
-          if (tc.id) existing.id = tc.id;
-          if (tc.function?.name) {
-            const n = tc.function.name;
-            // Some providers (incl. DeepSeek via OpenRouter) resend the full
-            // tool name on every chunk; OpenAI sends it once then only args.
-            // Concatenating both produces 'inspectinspect...'. Only add a delta.
-            if (existing.name === "" || !existing.name.endsWith(n)) {
-              existing.name += n;
-            }
-          }
-          if (tc.function?.arguments) {
-            const a = tc.function.arguments;
-            // Resend guard for the same reason: ignore a chunk whose args are
-            // already fully present at the tail of what we've accumulated.
-            if (!existing.args.endsWith(a)) existing.args += a;
-          }
-          toolCalls.set(String(index), existing);
-        }
-        feed({ content: "", toolCalls: new Map(toolCalls), done: false });
-      }
+      case "tool-call":
+        toolCalls.set(event.toolCallId, {
+          id: event.toolCallId,
+          name: event.toolName,
+          args: JSON.stringify(event.input),
+        });
+        onDelta({ content: "", toolCalls: new Map(toolCalls), done: false });
+        break;
+      case "finish":
+        onDelta({ content: "", toolCalls: new Map(toolCalls), done: true });
+        break;
+      case "error":
+        throw event.error;
     }
-    if (sawDone) break;
   }
-
-  feed({ content: "", toolCalls: new Map(toolCalls), done: true });
 }
