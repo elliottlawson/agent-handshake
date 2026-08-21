@@ -281,12 +281,13 @@ export function mount(root: HTMLElement): void {
   runLogPanel.id = "run-log-panel";
   runLogPanel.hidden = true;
 
-  const three = el("div", "columns");
+  // ---- setup: configure both sides --------------------------------------
+  const setup = el("div", "setup");
 
-  // ---- LEFT: Client AI (Requester A) -------------------------------------
-  const left = el("section", "column requester");
+  // LEFT: Client AI
+  const left = el("section", "setup-pane client");
   left.appendChild(el("h2", "col-title", "Client AI"));
-  left.appendChild(el("p", "hint", "Requester — no tools. Asks in natural language."));
+  left.appendChild(el("p", "hint", "Asks for data in natural language. No tools."));
   const pickerA = modelPicker((id) => {
     modelA = id;
   });
@@ -295,24 +296,17 @@ export function mount(root: HTMLElement): void {
   aModelWrap.appendChild(pickerA.root);
   left.appendChild(aModelWrap);
   const aPrompt = el("textarea", "prompt-input");
-  aPrompt.rows = 18;
+  aPrompt.rows = 6;
   aPrompt.value = promptA;
   aPrompt.addEventListener("input", () => {
     promptA = aPrompt.value;
   });
   left.appendChild(aPrompt);
 
-  // ---- MIDDLE: Conversation ------------------------------------------------
-  const mid = el("section", "column transcript");
-  mid.appendChild(el("h2", "col-title", "Conversation"));
-  const transcriptEl = el("div", "transcript");
-  transcriptEl.dataset.testid = "transcript";
-  mid.appendChild(transcriptEl);
-
-  // ---- RIGHT: Data AI (Source B) --------------------------------------------
-  const right = el("section", "column source");
+  // RIGHT: Data AI
+  const right = el("section", "setup-pane data");
   right.appendChild(el("h2", "col-title", "Data AI"));
-  right.appendChild(el("p", "hint", "Source — reads its dataset only through its tools."));
+  right.appendChild(el("p", "hint", "Owns the dataset; reads it only through tools."));
   const pickerB = modelPicker((id) => {
     modelB = id;
   });
@@ -352,17 +346,24 @@ export function mount(root: HTMLElement): void {
   right.appendChild(tickWrap);
 
   const bPrompt = el("textarea", "prompt-input");
-  bPrompt.rows = 18;
+  bPrompt.rows = 6;
   bPrompt.value = promptB;
   bPrompt.addEventListener("input", () => {
     promptB = bPrompt.value;
   });
   right.appendChild(bPrompt);
 
-  three.append(left, mid, right);
+  setup.append(left, right);
+
+  // ---- timeline: ONE linear chronological flow ---------------------------
+  const timeline = el("section", "timeline");
+  const transcriptEl = el("div", "transcript");
+  transcriptEl.dataset.testid = "transcript";
+  timeline.appendChild(el("h2", "col-title", "The negotiation"));
+  timeline.appendChild(transcriptEl);
 
   // ---- footer ----------------------------------------------------------------
-  const footer = el("footer", "footer");
+  const footer = el("footer", "api-key-footer");
   const keyGroup = el("div", "key-group");
   const keyInput = el("input") as HTMLInputElement;
   keyInput.type = "password";
@@ -399,7 +400,7 @@ export function mount(root: HTMLElement): void {
     ),
   );
 
-  root.append(header, scenarioBar, runLogPanel, three, footer);
+  root.append(header, scenarioBar, runLogPanel, setup, timeline, footer);
 
   // ---- behaviors -------------------------------------------------------------
   scenarioSel.addEventListener("change", () => {
